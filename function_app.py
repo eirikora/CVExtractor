@@ -293,27 +293,27 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
     #logging.info("REGEXMAP:"+str(regexmap))
     #logging.info("BUCKETMAP:"+str(bucketmap))
 
-    # Capture first 3 lines of doc for Rammeavtaleinfo and Oppdragsinformasjon (just in case)
+    # Capture first 4 lines of doc for Rammeavtaleinfo and Oppdragsinformasjon (just in case)
     linenum = 0
-    first3lines = ""
+    firstlines = ""
     for textline in textToSeparate.split("\n"):
         if len(textline.strip()) > 0:
             if any(re.findall(r'mvh|hilsen', textline, re.IGNORECASE)):
                 break
             linenum += 1
-            if linenum <= 5:
-                first3lines += textline + "\n"
+            if linenum <= 4:
+                firstlines += textline + "\n"
             else:
                 break
 
-    bucketstore['Rammeavtaleinfo'] += first3lines + "\n"
-    bucketstore['Oppdragsinformasjon'] += first3lines + "\n"
+    bucketstore['Rammeavtaleinfo'] += firstlines + "\n"
+    bucketstore['Oppdragsinformasjon'] += firstlines + "\n"
 
     textToSeparate = re.sub("\n","¨", textToSeparate) # Insert special character for EOL
     # Match all the heading regex against the textfile to identify the location of the headings
     for headingnum in regexmap.keys():
         buckets = json.dumps(bucketmap[headingnum])
-        textToSeparate = re.sub(regexmap[headingnum], "\g<1>¤HEADSTART¤" + "\g<2>" + "¤BUCKETINFO¤" + buckets + "¤HEADEND¤¨", textToSeparate, flags=re.IGNORECASE) # The heading is now match group 2. Match group is what we tested BEFORE heading.
+        textToSeparate = re.sub(regexmap[headingnum], "\g<1>¤HEADSTART¤" + "\g<2>" + "¤BUCKETINFO¤" + buckets + "¤HEADEND¤", textToSeparate, flags=re.IGNORECASE) # The heading is now match group 2. Match group is what we tested BEFORE heading.
         # Debug version
         # textToSeparate = re.sub(regexmap[headingnum], "\g<1>¤HEADSTART¤" + "\g<2>" + "//" + headinglist[headingnum] + "//" + str(headingnum) + "¤BUCKETINFO¤" + buckets + "¤HEADEND¤¨", textToSeparate, flags=re.IGNORECASE) # The heading is now match group 2. Match group is what we tested BEFORE heading.
         #print("\n")
@@ -337,7 +337,7 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
                 # Skriv blokken til buckets som er ønsket
                 writeBlockToBuckets(blockContent)
                 # Tøm tekstblokken og start på nytt med denne overskriftslinjen
-                blockContent = textline + "\n";
+                blockContent = textline + "\n"
             else:
                 # Just another line of text to keep...
                 blockContent = blockContent + textline + "\n"
@@ -345,7 +345,7 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
             if "¤HEADSTART¤" in textline:
                 # Vi starter en ny tekstblokk
                 insideBlock = True
-                blockContent = blockContent + textline + "\n"
+                blockContent = textline + "\n"
                 
     if insideBlock:
         # Skriv også siste blokken til buckets som er ønsket

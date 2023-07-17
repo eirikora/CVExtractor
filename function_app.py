@@ -83,6 +83,12 @@ def identifyFooters(document):
     #print("Threshold frequency set at: "+ str(threshold) + " resulting in " + str(len(footers)) + " footers.")
     return footers
 
+charactermap = { "\u2002":" ",
+                "\u201c":"\"",
+                "\u201d":"\"",
+                "\u2013":"-",
+                "\u2014":"-"
+                    }
     
 def cleanDocument(document_content):
     footers = identifyFooters(document_content)
@@ -95,8 +101,9 @@ def cleanDocument(document_content):
     buffer = ""
     # Traverse document line by line
     for textline in document_content.split("\n"):
-        # Remove EN_SPACE characters
-        textline = textline.replace("\u2002", " ")
+        # Remove/replace unicode characters
+        for (code, translated) in charactermap.items():
+            textline = textline.replace(code, translated)
         # Remove space before end of line
         textline = textline.rstrip()
         if textline == "" or textline in footers:
@@ -139,6 +146,13 @@ def cleanDocument(document_content):
     return final_result
 
 def headingToRegex(heading):
+    # TARGET REGEX is
+    # (^|[^T]¤\\n|[^¤]\\n)(([\.0-9]+\s+)?(\s*[a-zA-Z0-9]\)\s+)?HEADING:?[^\\$]*)
+    # where:
+    # (^|[^T]¤\\n|[^¤]\\n) = Start of document or start of line, BUT NOT preceeded by T¤ which would indicate inside an existing match
+    # ([\.0-9]+\s+)?(\s*[a-zA-Z0-9]\)\s+)? = Optional chapter number (e.g. "5.2") or "b)" or both
+    # HEADING:? = Heading text with optional ":" at end
+    # [^\\$]* = Some other characters until end of line or document
     # Trim space before and after
     heading = heading.strip()
     if heading.endswith(":"):
@@ -154,7 +168,9 @@ def headingToRegex(heading):
     heading = heading.replace("-", "\-")
 
     # Find generic elements in heading
-    heading = re.sub("(^|\s)[a-zA-Z0-9]\\)", "\g<1>¤LISTNUM¤", heading)
+    #heading = re.sub("(^|\s)[a-zA-Z0-9]\\)", "\g<1>¤LISTNUM¤", heading)
+    heading = re.sub("^\s*[\.0-9]+\s*", "", heading)
+    heading = re.sub("^\s*[a-zA-Z0-9]\)\s+", "", heading)
     heading = re.sub("[ \n\t]", "¤SPACE¤", heading)
     heading = heading.replace("*", "¤STAR¤")
     heading = heading.replace(")", "¤CLOSEBRACKET¤")
@@ -167,14 +183,14 @@ def headingToRegex(heading):
     heading = re.sub("(¤SPACE¤)+", "¤SPACE¤", heading)
     heading = re.sub("(¤NUMBER¤)+", "¤NUMBER¤", heading)
     # Make chapter number an option for all headings (reduces number of Regex)
-    if heading.startswith("¤NUMBER¤"):
-        heading = re.sub("¤NUMBER¤", "¤MAYBENUMBER¤", heading, count=1) # Replace only leftmost number
-    else:
-        heading = "¤MAYBENUMBER¤" + "¤SPACE¤" + heading
+    #if heading.startswith("¤NUMBER¤"):
+    #    heading = re.sub("¤NUMBER¤", "¤MAYBENUMBER¤", heading, count=1) # Replace only leftmost number
+    #else:
+    #    heading = "¤MAYBENUMBER¤" + "¤SPACE¤" + heading
     # Insert correct Regex
-    heading = heading.replace("¤MAYBENUMBER¤", "([\\.0-9]*|[a-zA-Z0-9]?\)?)")
+    heading = heading.replace("¤MAYBENUMBER¤", "([\\.0-9]*|[a-zA-Z0-9]?\)?")
     heading = heading.replace("¤SPACE¤", "\\s*")
-    heading = heading.replace("¤LISTNUM¤", "[a-zA-Z0-9]?\)?")
+    #heading = heading.replace("¤LISTNUM¤", "[a-zA-Z0-9]?\)?")
     heading = heading.replace("¤NUMBER¤", "[\\.0-9]+")
     heading = heading.replace("¤STAR¤", "\\*")
     heading = heading.replace("¤CLOSEBRACKET¤", "\\)")
@@ -183,11 +199,15 @@ def headingToRegex(heading):
     heading = heading.replace("¤ANYTHING¤", "(.*)")
     if ":" not in heading:
         # Add optional end colon for most headings
-        heading = heading + ":*"
+        heading = heading + ":?"
     # heading = "(^|[^T][^¤]\\n)\s?\s?\s?(" + heading + ")[ ]*(\\n|$)" # Match start of doc or heading right after lineshift that is NOT preceded by ¤HEADSTAR[T¤] (to avoid rematching) and expect only space until end of line(evt. doc)
     # return heading
-    heading = "(^|[^T]¤\\n|[^¤]\\n)\s?\s?\s?(" + heading + "([:;].*|\s*)(\\n|$))" # Match start of doc or heading right after lineshift that is NOT preceded by ¤HEADSTAR[T¤] (to avoid rematching) and expect only space until end of line(evt. doc)
-    return heading
+    # heading = "(^|[^T]¤\\n|[^¤]\\n)\s?\s?\s?(" + heading + "([:;].*|\s*))(\\n|$))" # Match start of doc or heading right after lineshift that is NOT preceded by ¤HEADSTAR[T¤] (to avoid rematching) and expect only space until end of line(evt. doc)
+    matchStartOfLine = "(^|[^T]¤¨|[^¤]¨)"
+    matchOptionalChapternum = "([\.0-9]+\s+)?(\s*[a-zA-Z0-9]\)\s+)?"
+    matchRestOfLine = "[^¨$]*"
+    regex = matchStartOfLine + "(" + matchOptionalChapternum + heading + matchRestOfLine + ")" # Brackets mark Match group 2
+    return regex
 
 bucketstore = {}
 
@@ -221,7 +241,7 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
         req_body = req.get_json()
     except ValueError:
         return func.HttpResponse(
-             "Could not find request body in json format. Please try again!",
+             "Could not find request body in json format. Please try again!:"+str(req.get_body()),
              status_code=400
         )
     
@@ -247,6 +267,7 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
     allbuckets = []
     regexmap = {}
     bucketmap = {}
+    headinglist = {}
     headingcount = 0
     for (heading, buckets) in headingmap.items():
         headingcount += 1
@@ -257,7 +278,13 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
         # logging.info(heading + " got regex " + regexforheading)
         regexmap[headingcount] = regexforheading
         bucketmap[headingcount] = buckets
+        headinglist[headingcount] = heading
     # print(allbuckets)
+
+    #debug_block += "REGEX USED:\n"
+    #for i in regexmap.keys():
+    #    debug_block += str(i) + ": " + headinglist[i] + " => " + regexmap[i] + "\n"
+    #debug_block += "--- END REGEX LIST ---\n\n"
 
     for bucket in allbuckets:
         bucketstore[bucket] = ""
@@ -282,14 +309,21 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
     bucketstore['Rammeavtaleinfo'] += first3lines + "\n"
     bucketstore['Oppdragsinformasjon'] += first3lines + "\n"
 
+    textToSeparate = re.sub("\n","¨", textToSeparate) # Insert special character for EOL
     # Match all the heading regex against the textfile to identify the location of the headings
     for headingnum in regexmap.keys():
         buckets = json.dumps(bucketmap[headingnum])
-        textToSeparate = re.sub(regexmap[headingnum], "\g<1>¤HEADSTART¤" + "\g<2>" + "¤BUCKETINFO¤" + buckets + "¤HEADEND¤\n", textToSeparate, flags=re.IGNORECASE) # The heading is now match group 2. Match group is what we tested BEFORE heading.
+        textToSeparate = re.sub(regexmap[headingnum], "\g<1>¤HEADSTART¤" + "\g<2>" + "¤BUCKETINFO¤" + buckets + "¤HEADEND¤¨", textToSeparate, flags=re.IGNORECASE) # The heading is now match group 2. Match group is what we tested BEFORE heading.
+        # Debug version
+        # textToSeparate = re.sub(regexmap[headingnum], "\g<1>¤HEADSTART¤" + "\g<2>" + "//" + headinglist[headingnum] + "//" + str(headingnum) + "¤BUCKETINFO¤" + buckets + "¤HEADEND¤¨", textToSeparate, flags=re.IGNORECASE) # The heading is now match group 2. Match group is what we tested BEFORE heading.
+        #print("\n")
+        #print(headingnum)
+        #print(headinglist[headingnum])
+        #print(regexmap[headingnum])
         
     # logging.info("MATCHED:"+textToSeparate)
     debug_block += "MATCHES IN DOCUMENT:\n"
-    for debugline in textToSeparate.split("\n"):
+    for debugline in textToSeparate.split("¨"):
         if "¤" in debugline:
             debug_block += debugline + "\n"
     debug_block += "--- END MATCHES IN DOCUMENT ---\n\n"
@@ -297,7 +331,7 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
     # Separate the text file: Identify all text blocks and write them to the right buckets
     insideBlock = False
     blockContent = ""
-    for textline in textToSeparate.split("\n"):
+    for textline in textToSeparate.split("¨"):
         if insideBlock:
             if "¤HEADSTART¤" in textline:
                 # Skriv blokken til buckets som er ønsket
@@ -321,7 +355,7 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
     for bucket in bucketstore.keys():
         bucketstore[bucket] = cleanDocument(bucketstore[bucket])
 
-    bucketstore["DEBUGINFO"] = re.sub("¤HEADSTART¤([^¤^\n]+)\n*¤BUCKETINFO¤([^¤]*)¤HEADEND¤", "\g<1> ==> \g<2>", debug_block)
+    bucketstore["DEBUGINFO"] = re.sub("¤HEADSTART¤([^¤]+)¤BUCKETINFO¤([^¤]*)¤HEADEND¤", "\g<1> ==> \g<2>", debug_block)
 
     return func.HttpResponse(json.dumps(bucketstore), mimetype="application/json", status_code=200)
 

@@ -29,7 +29,7 @@ def settKryssCleanup(document_text):
                 last_line = line
         if not innenfor:
             cleanline = line.lower().replace(".","").replace(":","").replace(";","").strip()
-            if cleanline.find("sett kryss") > -1: 
+            if cleanline.find("sett kryss") > -1 or cleanline.find("foreslått erfaringsnivå") > -1:
                 innenfor = True
             else:
                 return_text += line + "\n"
@@ -157,9 +157,9 @@ def headingToRegex(heading):
     heading = heading.strip()
     if heading.endswith(":"):
         heading = heading.rstrip(":")
-    if ":" in heading:
-        # Remove any trailing colons as will be added as option at end
-        heading = heading.split(":")[0] #+ "¤SPACE¤:" + "¤ANYTHING¤"
+    #if ":" in heading:
+    #    # Remove any trailing colons as will be added as option at end
+    #    heading = heading.split(":")[0] #+ "¤SPACE¤:" + "¤ANYTHING¤"
     # Escape characters that need escaping
     heading = heading.replace("/", "\/")
     heading = heading.replace("^", "\^")

@@ -7,6 +7,7 @@ import base64
 import mammoth
 import quopri
 import re
+import html
 from bs4 import BeautifulSoup
 from urllib.parse import unquote
 
@@ -91,7 +92,25 @@ charactermap = { "\u2002":" ",
                     }
     
 def cleanDocument(document_content):
+    # Correct encoding errors often seen in HTML content
+    document_content = html.unescape(document_content)
+
+    # Remove excessively repeating footers
     footers = identifyFooters(document_content)
+    
+    # Fjern innholdsfortegnelse
+    document_wo_fortegnelse = ""
+    inside_innholdsfortegnelse = False
+    for textline in document_content.split("\n"):
+        cleanline = textline.lower().strip().rstrip(":")
+        if cleanline == "innholdsfortegnelse" or cleanline == "innhold":
+            inside_innholdsfortegnelse = True
+        if cleanline == "":
+            inside_innholdsfortegnelse = False
+        if not inside_innholdsfortegnelse:
+            document_wo_fortegnelse += textline + "\n"
+    
+    # Traverse document again line by line to remove duplicates and fix characters
     emptylines = 0
     seen_content = False
     result_content = ""
@@ -99,8 +118,7 @@ def cleanDocument(document_content):
     duplicateCount = 0
     totalDuplicateCount = 0
     buffer = ""
-    # Traverse document line by line
-    for textline in document_content.split("\n"):
+    for textline in document_wo_fortegnelse.split("\n"):
         # Remove/replace unicode characters
         for (code, translated) in charactermap.items():
             textline = textline.replace(code, translated)
@@ -157,9 +175,6 @@ def headingToRegex(heading):
     heading = heading.strip()
     if heading.endswith(":"):
         heading = heading.rstrip(":")
-    #if ":" in heading:
-    #    # Remove any trailing colons as will be added as option at end
-    #    heading = heading.split(":")[0] #+ "¤SPACE¤:" + "¤ANYTHING¤"
     # Escape characters that need escaping
     heading = heading.replace("/", "\/")
     heading = heading.replace("^", "\^")
@@ -168,7 +183,6 @@ def headingToRegex(heading):
     heading = heading.replace("-", "\-")
 
     # Find generic elements in heading
-    #heading = re.sub("(^|\s)[a-zA-Z0-9]\\)", "\g<1>¤LISTNUM¤", heading)
     heading = re.sub("^\s*[\.0-9]+\s*", "", heading)
     heading = re.sub("^\s*[a-zA-Z0-9]\)\s+", "", heading)
     heading = re.sub("[ \n\t]", "¤SPACE¤", heading)
@@ -182,15 +196,9 @@ def headingToRegex(heading):
     # Remove duplicates
     heading = re.sub("(¤SPACE¤)+", "¤SPACE¤", heading)
     heading = re.sub("(¤NUMBER¤)+", "¤NUMBER¤", heading)
-    # Make chapter number an option for all headings (reduces number of Regex)
-    #if heading.startswith("¤NUMBER¤"):
-    #    heading = re.sub("¤NUMBER¤", "¤MAYBENUMBER¤", heading, count=1) # Replace only leftmost number
-    #else:
-    #    heading = "¤MAYBENUMBER¤" + "¤SPACE¤" + heading
     # Insert correct Regex
     heading = heading.replace("¤MAYBENUMBER¤", "([\\.0-9]*|[a-zA-Z0-9]?\)?")
     heading = heading.replace("¤SPACE¤", "\\s*")
-    #heading = heading.replace("¤LISTNUM¤", "[a-zA-Z0-9]?\)?")
     heading = heading.replace("¤NUMBER¤", "[\\.0-9]+")
     heading = heading.replace("¤STAR¤", "\\*")
     heading = heading.replace("¤CLOSEBRACKET¤", "\\)")
@@ -200,9 +208,6 @@ def headingToRegex(heading):
     if ":" not in heading:
         # Add optional end colon for most headings
         heading = heading + ":?"
-    # heading = "(^|[^T][^¤]\\n)\s?\s?\s?(" + heading + ")[ ]*(\\n|$)" # Match start of doc or heading right after lineshift that is NOT preceded by ¤HEADSTAR[T¤] (to avoid rematching) and expect only space until end of line(evt. doc)
-    # return heading
-    # heading = "(^|[^T]¤\\n|[^¤]\\n)\s?\s?\s?(" + heading + "([:;].*|\s*))(\\n|$))" # Match start of doc or heading right after lineshift that is NOT preceded by ¤HEADSTAR[T¤] (to avoid rematching) and expect only space until end of line(evt. doc)
     matchStartOfLine = "(^|[^T]¤¨|[^¤]¨)"
     matchOptionalChapternum = "([\.0-9]+\s+)?(\s*[a-zA-Z0-9]\)\s+)?"
     matchRestOfLine = "[^¨$]*"
@@ -264,7 +269,7 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
     textToSeparate = cleanDocument(textToSeparate)
     
     # Find all buckets and set them up. Calculate regexmap
-    allbuckets = []
+    allbuckets = ['Rammeavtaleinfo', 'Oppdragsinformasjon'] # At least these need to be there for the code to work.
     regexmap = {}
     bucketmap = {}
     headinglist = {}
@@ -309,6 +314,41 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
     bucketstore['Rammeavtaleinfo'] += firstlines + "\n"
     bucketstore['Oppdragsinformasjon'] += firstlines + "\n"
 
+    # Check all triggers against the document. If firing write also previous line to that bucket.
+    triggerList = []
+    if 'triggerlist' in req_body:
+        triggerList = req_body.get('triggerlist')
+        previousline = ""
+        remaining_lines_to_show = 0
+        previous_triggered_buckets = []
+        for textline in textToSeparate.split("\n"):
+            triggered = False
+            triggered_buckets = []
+            for trigger in triggerList:
+                flags = re.IGNORECASE if ("Ignorer" in trigger["case_sensitivitet"]) else 0
+                if any(re.findall(trigger["regex"], textline, flags)):
+                    triggered = True
+                    for bucket in trigger["til_buckets"]:
+                        if bucket not in triggered_buckets:
+                            triggered_buckets.append(bucket)
+            if triggered:
+                debug_block += "TRIGGERED" + str(triggered_buckets) + ":" + textline + "\n" 
+                for bucket in triggered_buckets:
+                    # insert textline in this bucket
+                    bucketstore[bucket] += previousline + textline + "\n"
+                    # print(bucket + ": " + previousline + textline)
+                    # bucketstore[bucket] += "TRIGGERED:"
+                previousline = "" # Avoid repeating if next line also triggers!
+                remaining_lines_to_show = 1
+            else:
+                previousline = textline + "\n"
+                if remaining_lines_to_show > 0:
+                    for bucket in previous_triggered_buckets:
+                        # insert textline in this bucket
+                        bucketstore[bucket] += textline + "\n"
+                    remaining_lines_to_show -= 1
+            previous_triggered_buckets = triggered_buckets.copy()
+
     textToSeparate = re.sub("\n","¨", textToSeparate) # Insert special character for EOL
     # Match all the heading regex against the textfile to identify the location of the headings
     for headingnum in regexmap.keys():
@@ -324,7 +364,7 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
     # logging.info("MATCHED:"+textToSeparate)
     debug_block += "MATCHES IN DOCUMENT:\n"
     for debugline in textToSeparate.split("¨"):
-        if "¤" in debugline:
+        if "¤" in debugline and ".........." not in debugline: # The "...." indicates an index which is not relevant
             debug_block += debugline + "\n"
     debug_block += "--- END MATCHES IN DOCUMENT ---\n\n"
 
@@ -333,7 +373,7 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
     blockContent = ""
     for textline in textToSeparate.split("¨"):
         if insideBlock:
-            if "¤HEADSTART¤" in textline:
+            if "¤HEADSTART¤" in textline and ".........." not in textline: # The "...." indicates an index which is not relevant
                 # Skriv blokken til buckets som er ønsket
                 writeBlockToBuckets(blockContent)
                 # Tøm tekstblokken og start på nytt med denne overskriftslinjen
@@ -342,7 +382,7 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
                 # Just another line of text to keep...
                 blockContent = blockContent + textline + "\n"
         else:
-            if "¤HEADSTART¤" in textline:
+            if "¤HEADSTART¤" in textline and ".........." not in textline: # The "...." indicates an index which is not relevant
                 # Vi starter en ny tekstblokk
                 insideBlock = True
                 blockContent = textline + "\n"

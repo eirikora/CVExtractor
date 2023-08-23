@@ -104,11 +104,20 @@ def cleanDocument(document_content):
     for textline in document_content.split("\n"):
         cleanline = textline.lower().strip().rstrip(":")
         if cleanline == "innholdsfortegnelse" or cleanline == "innhold":
+            # print("FANT INNHOLDSFORTEGNELSE")
             inside_innholdsfortegnelse = True
-        if cleanline == "":
-            inside_innholdsfortegnelse = False
+        else:
+            if inside_innholdsfortegnelse:
+                if cleanline == "":
+                    # print("TOM LINJE")
+                    inside_innholdsfortegnelse = False
+                elif not cleanline[-1].isdigit():
+                    # print("Ikke digit:"+cleanline)
+                    inside_innholdsfortegnelse = False
         if not inside_innholdsfortegnelse:
             document_wo_fortegnelse += textline + "\n"
+        #else:
+        #    print("IGNORING INDEX:" + textline + "\n")
     
     # Traverse document again line by line to remove duplicates and fix characters
     emptylines = 0
@@ -350,6 +359,8 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
             previous_triggered_buckets = triggered_buckets.copy()
 
     textToSeparate = re.sub("\n","¨", textToSeparate) # Insert special character for EOL
+    # logging.info("INITIAL:"+textToSeparate)
+
     # Match all the heading regex against the textfile to identify the location of the headings
     for headingnum in regexmap.keys():
         buckets = json.dumps(bucketmap[headingnum])

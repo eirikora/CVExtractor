@@ -10,6 +10,7 @@ import re
 import html
 from bs4 import BeautifulSoup
 from urllib.parse import unquote
+from docx import Document
 
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
@@ -278,7 +279,7 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
     textToSeparate = cleanDocument(textToSeparate)
     
     # Find all buckets and set them up. Calculate regexmap
-    allbuckets = ['Rammeavtaleinfo', 'Oppdragsinformasjon'] # At least these need to be there for the code to work.
+    allbuckets = ['Kundebeskrivelse', 'Oppdragsbeskrivelse'] # At least these need to be there for the code to work.
     regexmap = {}
     bucketmap = {}
     headinglist = {}
@@ -307,7 +308,7 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
     #logging.info("REGEXMAP:"+str(regexmap))
     #logging.info("BUCKETMAP:"+str(bucketmap))
 
-    # Capture first 4 lines of doc for Rammeavtaleinfo and Oppdragsinformasjon (just in case)
+    # Capture first 3 lines of doc for Kundebeskrivelse and Oppdragsbeskrivelse (just in case)
     linenum = 0
     firstlines = ""
     for textline in textToSeparate.split("\n"):
@@ -315,13 +316,13 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
             if any(re.findall(r'mvh|hilsen', textline, re.IGNORECASE)):
                 break
             linenum += 1
-            if linenum <= 4:
+            if linenum <= 3:
                 firstlines += textline + "\n"
             else:
                 break
 
-    bucketstore['Rammeavtaleinfo'] += firstlines + "\n"
-    bucketstore['Oppdragsinformasjon'] += firstlines + "\n"
+    bucketstore['Kundebeskrivelse'] += firstlines + "\n"
+    bucketstore['Oppdragsbeskrivelse'] += firstlines + "\n"
 
     # Check all triggers against the document. If firing write also previous line to that bucket.
     triggerList = []
@@ -456,6 +457,24 @@ def allowed_file(filename):
     ALLOWED_EXTENSIONS = {'doc', 'docx'}
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+def extract_header_footer(docx_path):
+    # Load the document using python-docx
+    doc = Document(docx_path)
+
+    # Extract header text
+    header_text = []
+    for section in doc.sections:
+        for header in section.header.paragraphs:
+            header_text.append(header.text)
+
+    # Extract footer text
+    footer_text = []
+    for section in doc.sections:
+        for footer in section.footer.paragraphs:
+            footer_text.append(footer.text)
+
+    return "\n".join(header_text + footer_text)
+
 @app.route(route="Word2Text", auth_level=func.AuthLevel.ANONYMOUS)
 def Word2Text(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Word2Text trigger function processed a request.')
@@ -490,6 +509,9 @@ def Word2Text(req: func.HttpRequest) -> func.HttpResponse:
             f.write(file_content)
             temp_filename = f.name
         
+        # Get the header and footer from the file
+        headerfooter = extract_header_footer(temp_filename)
+
         # Read and convert temp Word file into HTML for analysis
         with open(temp_filename, "rb") as docx_file:
             try:
@@ -511,6 +533,7 @@ def Word2Text(req: func.HttpRequest) -> func.HttpResponse:
         soup = BeautifulSoup(html, 'html.parser')
 
         plain_text = soup.get_text(separator='\n')
+        plain_text = headerfooter + '\n' + plain_text
         plain_text = re.sub('\t',' ',plain_text)
         # Return the resultset
         return func.HttpResponse(plain_text, mimetype="text/plain;charset=UTF-8", status_code=200)

@@ -20,8 +20,15 @@ def settKryssCleanup(document_text):
     innenfor = False
     last_line = ""
     for line in document_text.split("\n"):
+        # print('READ:'+line)
         if innenfor:
             if line.strip() == "":
+                innenfor = False
+                last_line = ""
+            elif line.strip().endswith(':'):
+                innenfor = False
+                last_line = ""
+            elif line.strip() == "Personlige egenskaper":
                 innenfor = False
                 last_line = ""
             elif line.strip().lower() == "x":
@@ -29,6 +36,7 @@ def settKryssCleanup(document_text):
                 last_line = ""
             else:
                 last_line = line
+                # print('KILLING:'+line)
         if not innenfor:
             cleanline = line.lower().replace(".","").replace(":","").replace(";","").strip()
             if cleanline.find("sett kryss") > -1 or cleanline.find("foreslått erfaringsnivå") > -1:
@@ -128,12 +136,18 @@ def cleanDocument(document_content):
     duplicateCount = 0
     totalDuplicateCount = 0
     buffer = ""
+    previousline = ""
     for textline in document_wo_fortegnelse.split("\n"):
         # Remove/replace unicode characters
         for (code, translated) in charactermap.items():
             textline = textline.replace(code, translated)
         # Remove space before end of line
         textline = textline.rstrip()
+        # Fix for Bane NOR: Edit Fagområde heading in table if it actually Erfaringsnivå to avoid confusion for ChatGPT
+        if (previousline == "Foreslått erfaringsnivå:" and textline == "Fagområde"):
+            textline = "Erfaringsnivå"
+        previousline = textline
+        # Remove duplicate lines
         if textline == "" or textline in footers:
             emptylines += 1
         else:
@@ -533,7 +547,7 @@ def Word2Text(req: func.HttpRequest) -> func.HttpResponse:
         soup = BeautifulSoup(html, 'html.parser')
 
         plain_text = soup.get_text(separator='\n')
-        plain_text = headerfooter + '\n' + plain_text
+        plain_text = "HEADER_FOOTER:\n" + headerfooter + '\nFRONT_PAGE:\n' + plain_text
         plain_text = re.sub('\t',' ',plain_text)
         # Return the resultset
         return func.HttpResponse(plain_text, mimetype="text/plain;charset=UTF-8", status_code=200)

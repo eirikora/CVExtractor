@@ -39,7 +39,7 @@ def settKryssCleanup(document_text):
                 # print('KILLING:'+line)
         if not innenfor:
             cleanline = line.lower().replace(".","").replace(":","").replace(";","").strip()
-            if cleanline.find("sett kryss") > -1 or cleanline.find("foreslått erfaringsnivå") > -1:
+            if cleanline.find("sett kryss") > -1: # or cleanline.find("foreslått erfaringsnivå") > -1:
                 innenfor = True
             else:
                 return_text += line + "\n"
@@ -105,7 +105,7 @@ def cleanDocument(document_content):
     document_content = html.unescape(document_content)
 
     # Remove excessively repeating footers
-    footers = identifyFooters(document_content)
+    footers = [] # Disabled problematic code: identifyFooters(document_content)
     
     # Fjern innholdsfortegnelse
     document_wo_fortegnelse = ""
@@ -145,8 +145,9 @@ def cleanDocument(document_content):
         textline = textline.rstrip()
         # Fix for Bane NOR: Edit Fagområde heading in table if it actually Erfaringsnivå to avoid confusion for ChatGPT
         if (previousline == "Foreslått erfaringsnivå:" and textline == "Fagområde"):
-            textline = "Erfaringsnivå"
+            textline = "" # Skip confusing work Fagområde when after Foreslått erfaringsnivå:
         previousline = textline
+
         # Remove duplicate lines
         if textline == "" or textline in footers:
             emptylines += 1
@@ -155,12 +156,14 @@ def cleanDocument(document_content):
             seen_content = True
             emptylines = 0
             if textline in memorybank.keys():
-                buffer += textline + "\n"
+                if (textline.endswith(':')): # Insert extra lineshift ahead of headings
+                    buffer += "¨"
+                buffer += textline + "¨"
                 memorybank[textline] += 1
                 seen_content = False
                 duplicateCount += 1
                 # print(str(duplicateCount) + " duplicate " + str(memorybank[textline]) + ":" + textline)
-                if duplicateCount >= 2: # After 2 repeating lines start emptying/deleting buffer
+                if duplicateCount >= 3: # After 3 repeating lines start emptying/deleting buffer
                     buffer = ""
             else:
                 memorybank[textline] = 1
@@ -169,14 +172,22 @@ def cleanDocument(document_content):
             
         if seen_content and emptylines < 3:
             # Only outputs content once we have seen it (avoid trailing blanks) and only accepts 2 empty lines
-            result_content += buffer + textline + "\n"
+            if (textline.endswith(':')): # Insert extra lineshift ahead of headings
+                result_content += buffer + "¨" + textline + "¨"
+            else:
+                result_content += buffer + textline + "¨"
             buffer = ""
     totalDuplicateCount += duplicateCount
     
     if len(footers) > 0:
-        result_content += "FOOTERS:\n"
+        result_content += "FOOTERS:¨"
         for line in footers:
-            result_content += line + "\n"
+            result_content += line + "¨"
+    
+    result_content = re.sub("^¨+", "", result_content) # Remove unnessesary lineshifts at beginning of document
+    result_content = re.sub(":¨+", ":¨", result_content) # Remove multiple lineshifts after colon (:). One is sufficient.
+    result_content = re.sub("¨¨+", "¨¨", result_content) # Remove more than two lineshifts in sequence. Two is always sufficient.
+    result_content = re.sub("¨", "\n", result_content) # Put back the lineshift character
         
     if totalDuplicateCount > 0:
         print( str(totalDuplicateCount)+ " duplicates removed!")
@@ -290,7 +301,7 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
     textToSeparate = req_body.get('texttoseparate')
 
     # Remove all duplicates and mess from document conversion (especially pdf2text which creates duplicates)
-    textToSeparate = cleanDocument(textToSeparate)
+    # textToSeparate = cleanDocument(textToSeparate)
     
     # Find all buckets and set them up. Calculate regexmap
     allbuckets = ['Kundebeskrivelse', 'Oppdragsbeskrivelse'] # At least these need to be there for the code to work.
@@ -323,6 +334,7 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
     #logging.info("BUCKETMAP:"+str(bucketmap))
 
     # Capture first 3 lines of doc for Kundebeskrivelse and Oppdragsbeskrivelse (just in case)
+    """ 
     linenum = 0
     firstlines = ""
     for textline in textToSeparate.split("\n"):
@@ -336,7 +348,7 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
                 break
 
     bucketstore['Kundebeskrivelse'] += firstlines + "\n"
-    bucketstore['Oppdragsbeskrivelse'] += firstlines + "\n"
+    bucketstore['Oppdragsbeskrivelse'] += firstlines + "\n" """
 
     # Check all triggers against the document. If firing write also previous line to that bucket.
     triggerList = []
@@ -387,10 +399,10 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
         #print(headinglist[headingnum])
         #print(regexmap[headingnum])
         
-    # logging.info("MATCHED:"+textToSeparate)
+    #logging.info("MATCHED:"+textToSeparate)
     debug_block += "MATCHES IN DOCUMENT:\n"
     for debugline in textToSeparate.split("¨"):
-        if "¤" in debugline and ".........." not in debugline: # The "...." indicates an index which is not relevant
+        if "¤" in debugline and "\.\.\.\.\.\.\.\.\.\." not in debugline: # The "...." indicates an index which is not relevant
             debug_block += debugline + "\n"
     debug_block += "--- END MATCHES IN DOCUMENT ---\n\n"
 
@@ -399,7 +411,7 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
     blockContent = ""
     for textline in textToSeparate.split("¨"):
         if insideBlock:
-            if "¤HEADSTART¤" in textline and ".........." not in textline: # The "...." indicates an index which is not relevant
+            if "¤HEADSTART¤" in textline and "\.\.\.\.\.\.\.\.\.\." not in textline: # The "...." indicates an index which is not relevant
                 # Skriv blokken til buckets som er ønsket
                 writeBlockToBuckets(blockContent)
                 # Tøm tekstblokken og start på nytt med denne overskriftslinjen
@@ -408,7 +420,7 @@ def DocSeparator(req: func.HttpRequest) -> func.HttpResponse:
                 # Just another line of text to keep...
                 blockContent = blockContent + textline + "\n"
         else:
-            if "¤HEADSTART¤" in textline and ".........." not in textline: # The "...." indicates an index which is not relevant
+            if "¤HEADSTART¤" in textline and "\.\.\.\.\.\.\.\.\.\." not in textline: # The "...." indicates an index which is not relevant
                 # Vi starter en ny tekstblokk
                 insideBlock = True
                 blockContent = textline + "\n"

@@ -1,3 +1,9 @@
+# Just local files
+cleantext.py
+test*.py
+*test.py
+function_app_BCP*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

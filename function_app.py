@@ -484,20 +484,32 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def extract_header_footer(docx_path):
-    # Load the document using python-docx
+    """
+    Load a .docx file and extract the header and footer from the first page only.
+
+    Args:
+        docx_path (str): Path to the .docx file.
+
+    Returns:
+        str: Header and footer text from the first page, separated by newlines.
+    """
+    # Load the document
     doc = Document(docx_path)
 
-    # Extract header text
-    header_text = []
-    for section in doc.sections:
-        for header in section.header.paragraphs:
-            header_text.append(header.text)
+    # Get the first section
+    section = doc.sections[0]
 
-    # Extract footer text
-    footer_text = []
-    for section in doc.sections:
-        for footer in section.footer.paragraphs:
-            footer_text.append(footer.text)
+    # If the document uses a different first page header/footer, use those
+    if section.different_first_page_header_footer:
+        header = section.first_page_header
+        footer = section.first_page_footer
+    else:
+        header = section.header
+        footer = section.footer
+
+    # Extract text
+    header_text = [p.text for p in header.paragraphs if p.text]
+    footer_text = [p.text for p in footer.paragraphs if p.text]
 
     return "\n".join(header_text + footer_text)
 
@@ -660,6 +672,7 @@ def ExtractCVData(req: func.HttpRequest) -> func.HttpResponse:
             'Kvalifikasjoner':'qualifications',
             'Prosjekterfaring':'experience', 
             'Erfaring':'experience', 
+            'Andre referanser og erfaring':'experience',
             'Utdanning':'education', 
             'Utdannelse':'education', 
             'Kurs':'courses/certifications', 
